@@ -31,37 +31,35 @@ let stars = [];
 
 // Audio context
 let audioContext;
+let soundfontPlayer;
+let audioInitialized = false;
 const audioSupported = !!(window.AudioContext || window.webkitAudioContext);
 
-if (!audioSupported) {
-    console.warn("Web Audio API is not supported in this browser. Sound will be disabled.");
-}
-
 // Initialize audio
-function initAudio() {
-    console.log("Initializing audio...");
-    try {
-        audioContext = new (window.AudioContext || window.webkitAudioContext)();
-        console.log("AudioContext created successfully. State:", audioContext.state);
-    } catch (error) {
-        console.error("Failed to create AudioContext:", error);
+async function initAudio() {
+    if (audioInitialized) return;
+
+    if (!audioSupported) {
+        console.warn("Web Audio API is not supported in this browser. Sound will be disabled.");
         return;
     }
 
-    if (audioContext.state === 'suspended') {
-        console.log("AudioContext is suspended. Waiting for user interaction.");
-        const resumeAudio = function() {
-            audioContext.resume().then(() => {
-                console.log("AudioContext resumed successfully");
-            }).catch(error => {
-                console.error("Failed to resume AudioContext:", error);
-            });
-            document.body.removeEventListener('click', resumeAudio);
-            document.body.removeEventListener('touchstart', resumeAudio);
-        };
+    try {
+        console.log("Initializing audio...");
+        audioContext = new (window.AudioContext || window.webkitAudioContext)();
+        await audioContext.resume();
         
-        document.body.addEventListener('click', resumeAudio);
-        document.body.addEventListener('touchstart', resumeAudio);
+        if (typeof Soundfont === 'undefined') {
+            throw new Error("Soundfont library not loaded.");
+        }
+
+        soundfontPlayer = await Soundfont.instrument(audioContext, 'acoustic_grand_piano');
+        audioInitialized = true;
+        console.log("Audio initialized successfully");
+    } catch (error) {
+        console.error("Failed to initialize audio:", error);
+        audioInitialized = false;
+        throw error;
     }
 }
 
@@ -97,7 +95,7 @@ class Star {
         this.worldY = y;
         this.screenX = this.worldX - cameraOffsetX + canvas.width / 2;
         this.screenY = this.worldY - cameraOffsetY + canvas.height / 2;
-        this.value = Math.floor(Math.random() * 41) + 10; // 10 to 50
+        this.value = Math.floor(Math.random() * 41) + 10;
         this.size = this.value / 2;
         this.haloSize = this.size * 2;
         this.vx = (Math.random() - 0.5) * 0.5;
@@ -105,9 +103,9 @@ class Star {
         this.isConsumed = false;
         this.isFlashing = false;
         this.flashIntensity = 0;
-		this.isNewborn = true;
+        this.isNewborn = true;
         this.birthProgress = 0;
-        this.birthDuration = 60; // Number of frames for birth animation
+        this.birthDuration = 60;
     }
 
     draw() {
@@ -116,15 +114,14 @@ class Star {
 
         if (this.isNewborn) {
             const birthPhase = this.birthProgress / this.birthDuration;
-            const fadeIn = Math.min(birthPhase * 2, 1); // Fade in during first half
-            const blinkIntensity = Math.sin(birthPhase * Math.PI * 2) * 0.5 + 0.5; // Blink effect
+            const fadeIn = Math.min(birthPhase * 2, 1);
+            const blinkIntensity = Math.sin(birthPhase * Math.PI * 2) * 0.5 + 0.5;
 
             ctx.fillStyle = `rgba(255, 255, 255, ${fadeIn * blinkIntensity})`;
             ctx.beginPath();
             ctx.arc(drawX, drawY, this.size * (1 + blinkIntensity), 0, Math.PI * 2);
             ctx.fill();
 
-            // Draw the normal star with increasing opacity
             this.drawNormalStar(drawX, drawY, fadeIn);
         } else if (this.isConsumed) {
             ctx.fillStyle = `rgba(255, 255, 255, ${this.flashIntensity})`;
@@ -143,11 +140,7 @@ class Star {
     }
 
     drawNormalStar(drawX, drawY, opacity) {
-        // Draw halo
-        const haloGradient = ctx.createRadialGradient(
-            drawX, drawY, 0,
-            drawX, drawY, this.haloSize
-        );
+        const haloGradient = ctx.createRadialGradient(drawX, drawY, 0, drawX, drawY, this.haloSize);
         haloGradient.addColorStop(0, `rgba(255, 100, 100, ${0.3 * opacity})`);
         haloGradient.addColorStop(1, 'rgba(255, 100, 100, 0)');
 
@@ -156,11 +149,7 @@ class Star {
         ctx.arc(drawX, drawY, this.haloSize, 0, Math.PI * 2);
         ctx.fill();
 
-        // Draw star core
-        const coreGradient = ctx.createRadialGradient(
-            drawX, drawY, 0,
-            drawX, drawY, this.size
-        );
+        const coreGradient = ctx.createRadialGradient(drawX, drawY, 0, drawX, drawY, this.size);
         coreGradient.addColorStop(0, `rgba(255, 50, 50, ${opacity})`);
         coreGradient.addColorStop(1, `rgba(255, 100, 100, ${0.5 * opacity})`);
 
@@ -199,16 +188,13 @@ class Star {
 
 // Initialize game objects
 function initializeGame() {
-    // Initialize snake at the center of the screen
     for (let i = 0; i < targetSnakeLength; i++) {
         snakeSegments.push(new SnakeSegment(canvas.width / 2, canvas.height / 2));
     }
 
-    // Reset initial camera offset
     cameraOffsetX = 0;
     cameraOffsetY = 0;
 
-    // Create initial galaxies
     for (let i = 0; i < numGalaxies; i++) {
         galaxies.push(new Galaxy(Math.random() * visibleRange * 2 - visibleRange, Math.random() * visibleRange * 2 - visibleRange));
     }
@@ -216,25 +202,16 @@ function initializeGame() {
 
 // Drawing functions
 function drawBackground() {
-    // Create gradient
-    const gradient = ctx.createRadialGradient(
-        canvas.width / 2, canvas.height / 2, 0,
-        canvas.width / 2, canvas.height / 2, canvas.width / 2
-    );
+    const gradient = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, 0, canvas.width / 2, canvas.height / 2, canvas.width / 2);
     gradient.addColorStop(0, `hsl(${hue}, 50%, 20%)`);
     gradient.addColorStop(1, `hsl(${hue}, 50%, 5%)`);
 
-    // Fill background
     ctx.fillStyle = gradient;
     ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-    // Draw galaxies
     galaxies.forEach(galaxy => galaxy.draw());
-
-    // Draw stars
     stars.forEach(star => star.draw());
 
-    // Check if new stars need to be added
     while (stars.length < minStars) {
         addNewStarAhead();
     }
@@ -264,16 +241,12 @@ function drawSnake() {
             if (i === snakeSegments.length - 1) {
                 ctx.moveTo(drawX, drawY);
             } else {
-                ctx.moveTo(
-                    startX + (snakeSegments[i+1].x - snakeSegments[0].x),
-                    startY + (snakeSegments[i+1].y - snakeSegments[0].y)
-                );
+                ctx.moveTo(startX + (snakeSegments[i + 1].x - snakeSegments[0].x), startY + (snakeSegments[i + 1].y - snakeSegments[0].y));
             }
             ctx.lineTo(drawX, drawY);
             ctx.stroke();
         }
 
-        // Draw head
         ctx.fillStyle = 'white';
         ctx.shadowColor = 'rgba(255, 255, 255, 0.8)';
         ctx.shadowBlur = 20;
@@ -281,52 +254,39 @@ function drawSnake() {
         ctx.arc(startX, startY, 8, 0, Math.PI * 2);
         ctx.fill();
 
-        // Draw eyes
         const eyeOffset = 3;
         const eyeSize = 2;
         ctx.fillStyle = 'blue';
         ctx.beginPath();
-        ctx.arc(startX + Math.cos(direction) * eyeOffset - Math.sin(direction) * eyeOffset, 
-                startY + Math.sin(direction) * eyeOffset + Math.cos(direction) * eyeOffset, 
-                eyeSize, 0, Math.PI * 2);
-        ctx.arc(startX + Math.cos(direction) * eyeOffset + Math.sin(direction) * eyeOffset, 
-                startY + Math.sin(direction) * eyeOffset - Math.cos(direction) * eyeOffset, 
-                eyeSize, 0, Math.PI * 2);
+        ctx.arc(startX + Math.cos(direction) * eyeOffset - Math.sin(direction) * eyeOffset, startY + Math.sin(direction) * eyeOffset + Math.cos(direction) * eyeOffset, eyeSize, 0, Math.PI * 2);
+        ctx.arc(startX + Math.cos(direction) * eyeOffset + Math.sin(direction) * eyeOffset, startY + Math.sin(direction) * eyeOffset - Math.cos(direction) * eyeOffset, eyeSize, 0, Math.PI * 2);
         ctx.fill();
     }
 }
 
 // Update functions
 function updateSnake() {
-    // Randomly change target direction
     if (Math.random() < 0.025) {
-        targetDirection += (Math.random() - 0.5) * Math.PI * 0.4; // Reduced for smoother turns
+        targetDirection += (Math.random() - 0.5) * Math.PI * 0.4;
     }
 
-    // Smoothly interpolate current direction towards target direction
     const turnSpeed = 0.02;
     direction += Math.sin(targetDirection - direction) * turnSpeed;
 
-    // Calculate new head position
     const newX = snakeSegments[0].x + Math.cos(direction) * snakeSpeed;
     const newY = snakeSegments[0].y + Math.sin(direction) * snakeSpeed;
 
-    // Add new head to the beginning of the snake array
     snakeSegments.unshift(new SnakeSegment(newX, newY));
 
-    // Adjust snake length dynamically
     if (snakeSegments.length > targetSnakeLength) {
-        snakeSegments.pop(); // Remove the tail segment if the snake is longer than target
+        snakeSegments.pop();
     }
 
-    // Update camera offset to keep the snake centered
     cameraOffsetX = snakeSegments[0].x - canvas.width / 2;
     cameraOffsetY = snakeSegments[0].y - canvas.height / 2;
 
-    // Manage stars
     updateStars();
 
-    // Add new stars if needed
     while (stars.length < minStars) {
         addNewStarAhead();
     }
@@ -335,44 +295,39 @@ function updateSnake() {
 function updateStars() {
     for (let i = stars.length - 1; i >= 0; i--) {
         const star = stars[i];
-        star.update(); // Update star position
+        star.update();
 
-        // Update screen coordinates
         star.screenX = star.worldX - cameraOffsetX + canvas.width / 2;
         star.screenY = star.worldY - cameraOffsetY + canvas.height / 2;
 
         const isOnScreen = star.screenX >= -100 && star.screenX <= canvas.width + 100 &&
                            star.screenY >= -100 && star.screenY <= canvas.height + 100;
 
-        // Collision detection
         if (!star.isConsumed && isOnScreen) {
             const dx = star.screenX - canvas.width / 2;
             const dy = star.screenY - canvas.height / 2;
             const distance = Math.sqrt(dx * dx + dy * dy);
-            const collisionRadius = star.size + 25; // Increased radius for collision
+            const collisionRadius = star.size + 25;
 
             if (distance < collisionRadius) {
                 star.isConsumed = true;
                 star.flashIntensity = 1;
-                targetSnakeLength += star.value; // Increase snake length
+                targetSnakeLength += star.value;
                 console.log("Star consumed at:", star.screenX, star.screenY);
                 console.log("Snake head at:", canvas.width / 2, canvas.height / 2);
             }
 
-            // Star flashing and sound
             if (distance < detectionRadius && !star.isFlashing) {
                 star.isFlashing = true;
                 star.flashIntensity = 1;
-                
-                // Play sound based on star's value
-                const minFrequency = 261.63; // C4
-                const maxFrequency = 1046.50; // C6
+
+                const minFrequency = 261.63;
+                const maxFrequency = 1046.50;
                 const frequency = minFrequency + (star.value / 50) * (maxFrequency - minFrequency);
                 playSound(frequency);
             }
         }
 
-        // Remove off-screen and fully consumed stars
         if ((!isOnScreen && !star.isConsumed) || (star.isConsumed && star.flashIntensity <= 0)) {
             stars.splice(i, 1);
         }
@@ -402,33 +357,27 @@ function addNewStarAhead() {
 }
 
 function playSound(frequency) {
-    if (!audioSupported) {
-        console.warn("Attempted to play sound, but audio is not supported.");
-        return;
-    }
-    if (!audioContext) {
-        console.error("AudioContext not initialized. Attempting to initialize now.");
-        initAudio();
-        if (!audioContext) {
-            console.error("Failed to initialize AudioContext. Cannot play sound.");
-            return;
-        }
-    }
-    if (audioContext.state !== 'running') {
-        console.warn("AudioContext not running. Current state:", audioContext.state);
+    if (!audioInitialized || !soundfontPlayer) {
+        console.warn("Audio not ready. Skipping sound playback.");
         return;
     }
     
+    if (audioContext.state !== 'running') {
+        audioContext.resume().then(() => {
+            playSoundInternal(frequency);
+        }).catch(error => {
+            console.error("Failed to resume audio context:", error);
+        });
+        return;
+    }
+    
+    playSoundInternal(frequency);
+}
+
+function playSoundInternal(frequency) {
     try {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-        oscillator.type = 'sine';
-        oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-        gainNode.gain.setValueAtTime(0.5, audioContext.currentTime);
-        oscillator.start();
-        oscillator.stop(audioContext.currentTime + 0.3);
+        const midiNote = Math.round(12 * Math.log2(frequency / 440) + 69);
+        soundfontPlayer.play(midiNote, audioContext.currentTime, {duration: 0.3});
         console.log("Sound played successfully");
     } catch (error) {
         console.error("Error playing sound:", error);
@@ -446,7 +395,6 @@ function drawDebugInfo() {
 
 // Main game loop
 function gameLoop() {
-    initAudio();
     time++;
     hue = (hue + 0.1) % 360;
     stripeHue = (stripeHue + 0.5) % 360;
@@ -459,25 +407,25 @@ function gameLoop() {
     requestAnimationFrame(gameLoop);
 }
 
-const audioBuffers = {};
-
-function loadSample(url) {
-    return fetch(url)
-        .then(response => response.arrayBuffer())
-        .then(arrayBuffer => audioContext.decodeAudioData(arrayBuffer))
-        .then(audioBuffer => {
-            const note = url.split('/').pop().split('.')[0];
-            audioBuffers[note] = audioBuffer;
-        });
-}
-
 // Initialize the game and start the game loop
-function startGame() {
+let audioInitializationInProgress = false;
+
+async function startGame() {
     initializeGame();
-	initAudio();
+    
+    if (!audioInitialized && !audioInitializationInProgress) {
+        audioInitializationInProgress = true;
+        try {
+            await initAudio();
+        } catch (error) {
+            console.error("Failed to initialize audio:", error);
+        } finally {
+            audioInitializationInProgress = false;
+        }
+    }
+    
     gameLoop();
 }
-
 
 // Add this new code:
 document.addEventListener('DOMContentLoaded', function() {
@@ -496,24 +444,4 @@ document.addEventListener('DOMContentLoaded', function() {
         this.style.display = 'none';
         startGame();
     });
-/*	const testSoundButton = document.createElement('button');
-    testSoundButton.textContent = 'Test Sound';
-    testSoundButton.style.position = 'absolute';
-    testSoundButton.style.top = '60%';
-    testSoundButton.style.left = '50%';
-    testSoundButton.style.transform = 'translate(-50%, -50%)';
-    document.body.appendChild(testSoundButton);
-
-    testSoundButton.addEventListener('click', function() {
-        console.log("Test sound button clicked");
-        if (audioContext && audioContext.state === 'suspended') {
-            audioContext.resume().then(() => {
-                console.log("AudioContext resumed from test button");
-                playSound(440); // Play a test tone (A4)
-            });
-        } else {
-            playSound(440);
-        }
-    });
-*/
 });
