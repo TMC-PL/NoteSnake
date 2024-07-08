@@ -135,47 +135,80 @@ class Star {
             const fadeIn = Math.min(birthPhase * 2, 1);
             const blinkIntensity = Math.sin(birthPhase * Math.PI * 2) * 0.5 + 0.5;
 
-            ctx.fillStyle = `rgba(255, 255, 255, ${fadeIn * blinkIntensity})`;
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, this.size * (1 + blinkIntensity), 0, Math.PI * 2);
-            ctx.fill();
-
+            this.drawGlow(drawX, drawY, fadeIn * blinkIntensity);
             this.drawNormalStar(drawX, drawY, fadeIn);
         } else if (this.isConsumed) {
-            ctx.fillStyle = `rgba(255, 255, 255, ${this.flashIntensity})`;
-            ctx.beginPath();
-            ctx.arc(drawX, drawY, this.haloSize * 2, 0, Math.PI * 2);
-            ctx.fill();
+            this.drawGlow(drawX, drawY, this.flashIntensity);
         } else {
             if (this.isFlashing) {
-                ctx.fillStyle = `rgba(255, 255, 255, ${this.flashIntensity})`;
-                ctx.beginPath();
-                ctx.arc(this.screenX, this.screenY, this.size * 2, 0, Math.PI * 2);
-                ctx.fill();
+                this.drawGlow(drawX, drawY, this.flashIntensity);
             }
             this.drawNormalStar(drawX, drawY, 1);
         }
     }
 
-    drawNormalStar(drawX, drawY, opacity) {
-        const haloGradient = ctx.createRadialGradient(drawX, drawY, 0, drawX, drawY, this.haloSize);
-        haloGradient.addColorStop(0, `rgba(255, 100, 100, ${0.3 * opacity})`);
-        haloGradient.addColorStop(1, 'rgba(255, 100, 100, 0)');
+	 drawGlow(drawX, drawY, opacity) {
+        const glowSize = this.size * 5;
+        ctx.save();
+        const glowGradient = ctx.createRadialGradient(drawX, drawY, 0, drawX, drawY, glowSize);
+        glowGradient.addColorStop(0, `rgba(255, 200, 200, ${opacity})`);
+        glowGradient.addColorStop(0.5, `rgba(255, 100, 100, ${opacity * 0.1})`);
+        glowGradient.addColorStop(1, 'rgba(255, 0, 0, 0)');
 
-        ctx.fillStyle = haloGradient;
+        ctx.globalCompositeOperation = 'lighter';
+        ctx.fillStyle = glowGradient;
         ctx.beginPath();
-        ctx.arc(drawX, drawY, this.haloSize, 0, Math.PI * 2);
+        ctx.arc(drawX, drawY, glowSize, 0, Math.PI * 2);
         ctx.fill();
+        ctx.restore();
+    }
 
-        const coreGradient = ctx.createRadialGradient(drawX, drawY, 0, drawX, drawY, this.size);
-        coreGradient.addColorStop(0, `rgba(255, 50, 50, ${opacity})`);
-        coreGradient.addColorStop(1, `rgba(255, 100, 100, ${0.5 * opacity})`);
+    drawNormalStar(drawX, drawY, opacity) {
+        const starSize = this.size;
+        const rayLength = starSize * 0;
 
+        ctx.save();
+
+        // Star core
+        const coreGradient = ctx.createRadialGradient(drawX, drawY, 0, drawX, drawY, starSize);
+        coreGradient.addColorStop(0, `rgba(255, 255, 255, ${opacity * 0.7})`);
+        coreGradient.addColorStop(1, `rgba(255, 200, 200, ${opacity * 0.4})`);
+
+        ctx.globalCompositeOperation = 'source-over';
         ctx.fillStyle = coreGradient;
         ctx.beginPath();
-        ctx.arc(drawX, drawY, this.size, 0, Math.PI * 2);
+        ctx.arc(drawX, drawY, starSize, 0, Math.PI * 2);
         ctx.fill();
+
+        // Lens flare rays
+        ctx.globalCompositeOperation = 'screen';
+
+        const rayAngles = [0, Math.PI / 2, Math.PI, 3 * Math.PI / 2];
+        rayAngles.forEach(angle => {
+            const gradient = ctx.createLinearGradient(
+                drawX, drawY,
+                drawX + Math.cos(angle) * rayLength,
+                drawY + Math.sin(angle) * rayLength
+            );
+            gradient.addColorStop(0, `rgba(255, 255, 255, ${opacity * 0.7})`);
+            gradient.addColorStop(1, 'rgba(255, 255, 255, 0)');
+
+            ctx.strokeStyle = gradient;
+            ctx.lineWidth = starSize / 8;
+            ctx.lineCap = 'round';
+            ctx.beginPath();
+            ctx.moveTo(drawX, drawY);
+            ctx.lineTo(
+                drawX + Math.cos(angle) * rayLength,
+                drawY + Math.sin(angle) * rayLength
+            );
+            ctx.stroke();
+        });
+
+        ctx.restore();
     }
+
+
 
 	calculateFlashDuration() {
 		// Base duration (in frames, assuming 60 fps)
@@ -262,7 +295,7 @@ function drawSnake() {
         const startX = canvas.width / 2;
         const startY = canvas.height / 2;
 
-        ctx.lineWidth = 10;
+        ctx.lineWidth = 15;
         ctx.lineCap = 'round';
         ctx.lineJoin = 'round';
 
@@ -392,13 +425,18 @@ function addNewStarAhead() {
     const minDistance = Math.max(canvas.width, canvas.height) / 2;
     const maxDistance = visibleRange / 2;
     const distance = Math.random() * (maxDistance - minDistance) + minDistance;
-    const worldX = Math.cos(angle) * distance + cameraOffsetX;
-    const worldY = Math.sin(angle) * distance + cameraOffsetY;
+
+    // Adjusting the star position based on the aspect ratio
+    const aspectRatio = canvas.width / canvas.height;
+    const worldX = Math.cos(angle) * distance * aspectRatio + cameraOffsetX;
+    const worldY = Math.sin(angle) * distance / aspectRatio + cameraOffsetY;
+
     const newStar = new Star(worldX, worldY);
     newStar.screenX = worldX - cameraOffsetX + canvas.width / 2;
     newStar.screenY = worldY - cameraOffsetY + canvas.height / 2;
     stars.push(newStar);
 }
+
 
 function playSound(frequency, distance) {
     if (!audioInitialized || !soundfontPlayer) {
@@ -437,7 +475,7 @@ function playSoundInternal(frequency, distance) {
         soundfontPlayer.play(midiNote, audioContext.currentTime, { gain: volume, duration: 0.3 });
 
         // We're not checking the return value anymore since it's always null or undefined
-        //console.log("Sound playback initiated");
+        console.log("Sound playback initiated");
     } catch (error) {
         console.error("Error in playSoundInternal:", error);
     }
