@@ -6,7 +6,7 @@ canvas.height = window.innerHeight;
 
 // Game constants
 const visibleRange = 1000;
-const detectionRadius = 150;
+const detectionRadius = 250;
 const numGalaxies = 100;
 const maxStars = 100;
 const minStars = 30;
@@ -33,7 +33,14 @@ let stars = [];
 let audioContext;
 let soundfontPlayer;
 let audioInitialized = false;
+let lastSoundPlayTime = 0;
+const minTimeBetweenSounds = 100; // milliseconds
 const audioSupported = !!(window.AudioContext || window.webkitAudioContext);
+let masterVolume = 1;
+
+function setVolume(volume) {
+    masterVolume = Math.max(0, Math.min(1, volume));
+}
 
 // Initialize audio
 async function initAudio() {
@@ -53,7 +60,16 @@ async function initAudio() {
             throw new Error("Soundfont library not loaded.");
         }
 
-        soundfontPlayer = await Soundfont.instrument(audioContext, 'acoustic_grand_piano');
+        soundfontPlayer = await Soundfont.instrument(audioContext, 'acoustic_grand_piano', { soundfont: 'MusyngKite' });
+        if (!soundfontPlayer) {
+            throw new Error("Failed to initialize soundfontPlayer");
+        }
+
+        // Play a test sound
+        console.log("Playing test sound...");
+        soundfontPlayer.play(60, audioContext.currentTime, { gain: 0.5, duration: 0.5 });
+        console.log("Test sound playback initiated");
+
         audioInitialized = true;
         console.log("Audio initialized successfully");
     } catch (error) {
@@ -106,6 +122,8 @@ class Star {
         this.isNewborn = true;
         this.birthProgress = 0;
         this.birthDuration = 60;
+		this.flashDuration = this.calculateFlashDuration();
+		this.flashProgress = 0;
     }
 
     draw() {
@@ -159,6 +177,21 @@ class Star {
         ctx.fill();
     }
 
+	calculateFlashDuration() {
+		// Base duration (in frames, assuming 60 fps)
+		const wholeDuration = 60;  // 1 second
+		const halfDuration = 30;   // 0.5 seconds
+		const quarterDuration = 15; // 0.25 seconds
+
+		if (this.size > 15) {
+			return wholeDuration;
+		} else if (this.size > 10) {
+			return halfDuration;
+		} else {
+			return quarterDuration;
+		}
+	}
+
     update() {
         this.worldX += this.vx;
         this.worldY += this.vy;
@@ -170,13 +203,20 @@ class Star {
             }
         }
 
-        if (this.isFlashing) {
-            this.flashIntensity -= 0.05;
-            if (this.flashIntensity <= 0) {
-                this.isFlashing = false;
-                this.flashIntensity = 0;
-            }
-        }
+		if (this.isFlashing) {
+			this.flashProgress++;
+			if (this.flashProgress <= this.flashDuration / 2) {
+				this.flashIntensity = this.flashProgress / (this.flashDuration / 2);
+			} else {
+				this.flashIntensity = 1 - (this.flashProgress - this.flashDuration / 2) / (this.flashDuration / 2);
+			}
+
+			if (this.flashProgress >= this.flashDuration) {
+				this.isFlashing = false;
+				this.flashIntensity = 0;
+				this.flashProgress = 0;
+			}
+		}
         
         if (this.isConsumed) {
             this.flashIntensity -= 0.02;
@@ -317,15 +357,19 @@ function updateStars() {
                 console.log("Snake head at:", canvas.width / 2, canvas.height / 2);
             }
 
-            if (distance < detectionRadius && !star.isFlashing) {
-                star.isFlashing = true;
-                star.flashIntensity = 1;
+			if (distance < detectionRadius && !star.isFlashing) {
+				star.isFlashing = true;
+				star.flashIntensity = 1;
 
-                const minFrequency = 261.63;
-                const maxFrequency = 1046.50;
-                const frequency = minFrequency + (star.value / 50) * (maxFrequency - minFrequency);
-                playSound(frequency);
-            }
+				const currentTime = Date.now();
+				if (currentTime - lastSoundPlayTime >= minTimeBetweenSounds) {
+					const minFrequency = 261.63;
+					const maxFrequency = 1046.50;
+					const frequency = minFrequency + (star.value / 50) * (maxFrequency - minFrequency);
+					playSound(frequency, distance);
+					lastSoundPlayTime = currentTime;
+				}
+			}
         }
 
         if ((!isOnScreen && !star.isConsumed) || (star.isConsumed && star.flashIntensity <= 0)) {
@@ -356,7 +400,7 @@ function addNewStarAhead() {
     stars.push(newStar);
 }
 
-function playSound(frequency) {
+function playSound(frequency, distance) {
     if (!audioInitialized || !soundfontPlayer) {
         console.warn("Audio not ready. Skipping sound playback.");
         return;
@@ -364,25 +408,42 @@ function playSound(frequency) {
     
     if (audioContext.state !== 'running') {
         audioContext.resume().then(() => {
-            playSoundInternal(frequency);
+            playSoundInternal(frequency, distance);
         }).catch(error => {
             console.error("Failed to resume audio context:", error);
         });
         return;
     }
     
-    playSoundInternal(frequency);
+    playSoundInternal(frequency, distance);
 }
 
-function playSoundInternal(frequency) {
+
+function playSoundInternal(frequency, distance) {
     try {
+        if (!soundfontPlayer) {
+            console.error("soundfontPlayer is not initialized");
+            return;
+        }
+
         const midiNote = Math.round(12 * Math.log2(frequency / 440) + 69);
-        soundfontPlayer.play(midiNote, audioContext.currentTime, {duration: 0.3});
-        console.log("Sound played successfully");
+
+        // Calculate volume based on distance
+        const volume = Math.max(0, 1 - distance / detectionRadius) * masterVolume + 0.5;
+
+        //console.log(`Playing sound: midiNote: ${midiNote}, frequency: ${frequency}, distance: ${distance}, volume: ${volume}`);
+
+        // Use soundfontPlayer to play the note
+        soundfontPlayer.play(midiNote, audioContext.currentTime, { gain: volume, duration: 0.3 });
+
+        // We're not checking the return value anymore since it's always null or undefined
+        //console.log("Sound playback initiated");
     } catch (error) {
-        console.error("Error playing sound:", error);
+        console.error("Error in playSoundInternal:", error);
     }
 }
+
+
 
 function drawDebugInfo() {
     ctx.fillStyle = 'white';
@@ -427,7 +488,7 @@ async function startGame() {
     gameLoop();
 }
 
-// Add this new code:
+// some buttons
 document.addEventListener('DOMContentLoaded', function() {
     const startButton = document.createElement('button');
     startButton.id = 'startButton';
@@ -444,4 +505,15 @@ document.addEventListener('DOMContentLoaded', function() {
         this.style.display = 'none';
         startGame();
     });
+
+});
+document.body.insertAdjacentHTML('beforeend', `
+    <div style="position: absolute; top: 10px; right: 10px;">
+        <label for="volumeControl">Volume: </label>
+        <input type="range" id="volumeControl" min="0" max="1" step="0.1" value="1">
+    </div>
+`);
+
+document.getElementById('volumeControl').addEventListener('input', function(e) {
+    setVolume(parseFloat(e.target.value));
 });
